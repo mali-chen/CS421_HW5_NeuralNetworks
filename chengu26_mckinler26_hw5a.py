@@ -44,3 +44,87 @@ def forward_matrix(x, w_hidden, w_output):
     final_output = sigmoid(final_input)             
 
     return hidden_with_bias, final_output
+
+# step 3:
+# Cited from Copilot
+def sigmoid_derivative(x):
+    return x * (1 - x)
+
+def backpropagation(x, target, W_hidden, W_output, learning_rate=0.1):
+    # Forward pass
+    h_b, y = forward_matrix(x, W_hidden, W_output)
+
+    # Compute output error
+    error_output = target - y  # shape (1,)
+    delta_output = error_output * sigmoid_derivative(y)  # shape (1,)
+
+    # Compute hidden layer error
+    h = h_b[:-1]  # remove bias from hidden output
+    W_output_no_bias = W_output[:, :-1]  # shape (1, 8)
+    error_hidden = delta_output.dot(W_output_no_bias)  # shape (8,)
+    delta_hidden = error_hidden * sigmoid_derivative(h)  # shape (8,)
+
+    # Update output weights
+    W_output += learning_rate * delta_output.reshape(-1, 1) * h_b.reshape(1, -1)
+
+    # Prepare input with bias
+    x_b = np.append(x, 1)  # shape (5,)
+    # Update hidden weights
+    W_hidden += learning_rate * delta_hidden.reshape(-1, 1) * x_b.reshape(1, -1)
+
+    return W_hidden, W_output
+
+# step 4:
+# training data (from PartA_TrainingData.txt)
+examples = [
+    ([0, 0, 0, 0], [0]),
+    ([0, 0, 0, 1], [1]),
+    ([0, 0, 1, 0], [0]),
+    ([0, 0, 1, 1], [1]),
+    ([0, 1, 0, 0], [0]),
+    ([0, 1, 0, 1], [1]),
+    ([0, 1, 1, 0], [0]),
+    ([0, 1, 1, 1], [1]),
+    ([1, 0, 0, 0], [1]),
+    ([1, 0, 0, 1], [1]),
+    ([1, 0, 1, 0], [1]),
+    ([1, 0, 1, 1], [1]),
+    ([1, 1, 0, 0], [0]),
+    ([1, 1, 0, 1], [0]),
+    ([1, 1, 1, 0], [0]),
+    ([1, 1, 1, 1], [1])
+]
+
+# training loop
+max_epochs = 10000    
+epoch = 0
+average_error = 1.0
+
+while average_error > 0.05 and epoch < max_epochs:
+    total_error = 0.0
+    # randomly pick 10 examples each epoch
+    samples = random.sample(examples, 10)
+
+    # train on each sample
+    for x, target in samples:
+        x = np.array(x)
+        target = np.array(target)
+
+        # forward + backprop update
+        W_hidden, W_output = backpropagation(x, target, w_hidden, w_output, learning_rate=0.5)
+
+        # calculate network output (to measure error)
+        _, output = forward_matrix(x, W_hidden, W_output)
+        sample_error = (target - output) ** 2
+        total_error += sample_error
+
+        # update global weights (so the network keeps improving)
+        w_hidden, w_output = W_hidden, W_output
+
+    # compute average error for this epoch
+    average_error = total_error.mean()
+    epoch += 1
+    print(f"Epoch {epoch}: Avg Error = {average_error:.4f}")
+
+print("\nTraining complete!")
+print(f"Final average error: {average_error:.4f}")
