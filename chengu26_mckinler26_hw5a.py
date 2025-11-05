@@ -16,31 +16,31 @@ np.random.seed(0)
 w_hidden = np.random.uniform(-1.0, 1.0, (n_hidden, n_input + 1))  # +1 for bias
 w_output = np.random.uniform(-1.0, 1.0, (n_output, n_hidden + 1)) # +1 for bias
 
-# step 2
+# step 2:
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
-def forward_matrix(x, W_hidden, W_output):
+def forward_matrix(x, w_hidden, w_output):
 
-    # Sourced from ChatGBT
-    # Performs a forward pass using matrix multiplication.
-    # x: 1D numpy array of shape (4,)
-    # W_hidden: (8, 5)
-    # W_output: (1, 9)
-    # Returns: (hidden_output_with_bias, final_output)
+    # Do one forward pass through the neural network.
+    # x: input array of 4 numbers 
+    # w_hidden: weights from input -> hidden layer (8 rows x 5 cols)
+    # w_output: weights from hidden -> output layer (1 row x 9 cols)
 
-    # add bias to input
-    x_b = np.append(x, 1) # shape (5,)
+    # add bias input
+    x_with_bias = np.append(x, 1)  # now x has 5 numbers
 
-    # hidden layer activation
-    z_hidden = np.dot(W_hidden, x_b) # shape (8,)
-    h = sigmoid(z_hidden)
+    # calculate hidden layer signals using matrix multiplication
+    hidden_inputs = np.dot(w_hidden, x_with_bias)  
 
-    # add bias to hidden layer output
-    h_b = np.append(h, 1) # shape (9,)
+    # apply sigmoid to get hidden layer outputs 
+    hidden_outputs = sigmoid(hidden_inputs)
 
-    # output layer
-    z_output = np.dot(W_output, h_b) # shape (1,)
-    y = sigmoid(z_output)
+    # add bias to hidden layer outputs (for the output layer’s bias)
+    hidden_with_bias = np.append(hidden_outputs, 1)  # now has 9 numbers
 
-    return h_b, y
+    # Calculate final output
+    final_input = np.dot(w_output, hidden_with_bias)  
+    final_output = sigmoid(final_input)             
+
+    return hidden_with_bias, final_output
