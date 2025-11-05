@@ -1,0 +1,73 @@
+import numpy as np
+import random
+
+# CS 421 - Homework 5: Part A
+# Date: Nov. 4, 2025
+# Authors: Malissa Chen and Rhiannon McKinley
+
+# step 1:
+# network structure
+n_input = 4
+n_hidden = 8
+n_output = 1
+
+# initialize weights
+np.random.seed(0)
+w_hidden = np.random.uniform(-1.0, 1.0, (n_hidden, n_input + 1))  # +1 for bias
+w_output = np.random.uniform(-1.0, 1.0, (n_output, n_hidden + 1)) # +1 for bias
+
+# step 2:
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def forward_matrix(x, w_hidden, w_output):
+
+    # Do one forward pass through the neural network.
+    # x: input array of 4 numbers 
+    # w_hidden: weights from input -> hidden layer (8 rows x 5 cols)
+    # w_output: weights from hidden -> output layer (1 row x 9 cols)
+
+    # add bias input
+    x_with_bias = np.append(x, 1)  # now x has 5 numbers
+
+    # calculate hidden layer signals using matrix multiplication
+    hidden_inputs = np.dot(w_hidden, x_with_bias)  
+
+    # apply sigmoid to get hidden layer outputs 
+    hidden_outputs = sigmoid(hidden_inputs)
+
+    # add bias to hidden layer outputs (for the output layer’s bias)
+    hidden_with_bias = np.append(hidden_outputs, 1)  # now has 9 numbers
+
+    # Calculate final output
+    final_input = np.dot(w_output, hidden_with_bias)  
+    final_output = sigmoid(final_input)             
+
+    return hidden_with_bias, final_output
+
+def sigmoid_derivative(x):
+    return x * (1 - x)
+
+def backpropagation(x, target, W_hidden, W_output, learning_rate=0.1):
+    # Forward pass
+    h_b, y = forward_matrix(x, W_hidden, W_output)
+
+    # Compute output error
+    error_output = target - y  # shape (1,)
+    delta_output = error_output * sigmoid_derivative(y)  # shape (1,)
+
+    # Compute hidden layer error
+    h = h_b[:-1]  # remove bias from hidden output
+    W_output_no_bias = W_output[:, :-1]  # shape (1, 8)
+    error_hidden = delta_output.dot(W_output_no_bias)  # shape (8,)
+    delta_hidden = error_hidden * sigmoid_derivative(h)  # shape (8,)
+
+    # Update output weights
+    W_output += learning_rate * delta_output.reshape(-1, 1) * h_b.reshape(1, -1)
+
+    # Prepare input with bias
+    x_b = np.append(x, 1)  # shape (5,)
+    # Update hidden weights
+    W_hidden += learning_rate * delta_hidden.reshape(-1, 1) * x_b.reshape(1, -1)
+
+    return W_hidden, W_output
