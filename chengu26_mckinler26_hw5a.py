@@ -45,7 +45,7 @@ def forward_matrix(x, weight_hidden, weight_output):
 def sigmoid_derivative(x):
     return x * (1 - x)
 
-def backpropagation(x, target, weight_hidden, weight_output, learning_rate=3.0):
+def backpropagation(x, target, weight_hidden, weight_output, learning_rate=0.5):
     # Forward pass
     h_b, y = forward_matrix(x, weight_hidden, weight_output)
 
@@ -106,7 +106,7 @@ while average_error > 0.05 and epoch < max_epochs:
         target = np.array(target)
 
         # forward + backprop update
-        weight_hidden, weight_output = backpropagation(x, target, weight_hidden, weight_output, learning_rate= 3.0)
+        weight_hidden, weight_output = backpropagation(x, target, weight_hidden, weight_output, learning_rate= 0.5)
 
         # calculate network output (to measure error)
         _, output = forward_matrix(x, weight_hidden, weight_output)
