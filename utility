@@ -1,0 +1,104 @@
+def evaluate(self, state):
+    # compute a normalized utility score for a given state
+    player_id = state.whoseTurn
+    opponent_id = 1 - player_id
+
+    my_inv = state.inventories[player_id]
+    opp_inv = state.inventories[opponent_id]
+
+    # food comparison
+    food_diff = my_inv.foodCount - opp_inv.foodCount
+    food_score = 0.5 + 0.5 * food_diff / max(abs(food_diff) + 2, 2)
+
+    # army strength
+    combat_types = (DRONE, SOLDIER, R_SOLDIER)
+
+    def effective_health(a):
+        return a.health + 7 if a.type == R_SOLDIER else a.health
+
+    my_army = sum(effective_health(a) for a in my_inv.ants if a.type in combat_types)
+    opp_army = sum(effective_health(a) for a in opp_inv.ants if a.type in combat_types)
+    army_score = 0.5 + 0.5 * (my_army - opp_army) / max(my_army + opp_army, 1)
+
+    # worker evaluation
+    def worker_factor(ants):
+        count = len([a for a in ants if a.type == WORKER])
+        if count == 0:
+            return 0.1
+        if count == 1:
+            return 0.6
+        if count == 2:
+            return 1.0
+        return 0.5
+
+    my_worker_score = worker_factor(my_inv.ants)
+    opp_worker_score = worker_factor(opp_inv.ants)
+    worker_score = 0.67 * my_worker_score + 0.33 * (1 - opp_worker_score)
+
+    # worker tasks
+    food_bonus, pickup_prox, delivery_prox = 0, 0.5, 0.5
+    my_workers = [a for a in my_inv.ants if a.type == WORKER]
+
+    if my_workers:
+        distances = []
+        hill_and_tunnels = [my_inv.getAnthill()] + my_inv.getTunnels()
+        foods = getConstrList(state, NEUTRAL, [FOOD])
+
+        for w in my_workers:
+            if w.carrying:
+                food_bonus += 0.3
+                if hill_and_tunnels:
+                    distances.append(min(approxDist(w.coords, d.coords) for d in hill_and_tunnels if d))
+            elif foods:
+                distances.append(min(approxDist(w.coords, f.coords) for f in foods))
+
+        if distances:
+            closest, avg_dist = min(distances), sum(distances) / len(distances)
+            delivery_prox = 1 / (1 + closest)
+            pickup_prox = 1 / (1 + avg_dist)
+
+        deposit_bonus = sum(
+            0.5 for w in my_workers if w.carrying and any(w.coords == d.coords for d in [my_inv.getAnthill()] + my_inv.getTunnels() if d)
+        )
+        task_score = 0.3 * pickup_prox + 0.2 * delivery_prox + food_bonus + deposit_bonus
+    else:
+        task_score = 0
+
+    # queen and hill factors
+    queen = my_inv.getQueen()
+    enemy_queen = opp_inv.getQueen()
+    my_hill = my_inv.getAnthill()
+    opp_hill = opp_inv.getAnthill()
+
+    queen_score = (queen.health / 10.0) if queen else 0
+    my_hill_score = min(max((my_hill.captureHealth / 3.0) if my_hill else 0, 0), 1)
+    opp_hill_score = min(max((opp_hill.captureHealth / 3.0) if opp_hill else 0, 0), 1)
+
+    # distances to attack and threats
+    def dist_score(ants, targets):
+        targets = [t for t in targets if t is not None]
+        if not ants or not targets:
+            return 0.5
+        dists = [approxDist(a.coords, t.coords) for a in ants for t in targets]
+        min_d, avg_d = min(dists), sum(dists) / len(dists)
+        return (1 / (1 + min_d) + 1 / (1 + avg_d)) / 2
+
+    attack_targets = [enemy_queen, opp_hill] + [a for a in opp_inv.ants if a.type == WORKER]
+    threat_targets = [queen, my_hill]
+    attack_score = dist_score(getAntList(state, player_id, combat_types), attack_targets)
+    threat_score = dist_score(getAntList(state, opponent_id, combat_types), threat_targets)
+
+    # combine scores
+    raw_score = (
+        0.30 * food_score +
+        0.20 * worker_score +
+        0.10 * task_score +
+        0.15 * army_score +
+        0.10 * queen_score +
+        0.05 * (1 - my_hill_score) +
+        0.05 * (1 - opp_hill_score) +
+        0.05 * attack_score -
+        0.05 * threat_score
+    )
+
+    return max(0.0, min(1.0, smooth_score(raw_score)))
