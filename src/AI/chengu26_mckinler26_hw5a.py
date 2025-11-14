@@ -27,12 +27,10 @@ np.random.seed(0)
 weight_hidden = np.random.uniform(-1.0, 1.0, (num_hidden, num_input + 1))
 weight_output = np.random.uniform(-1.0, 1.0, (num_output, num_hidden + 1))
 
-# step 2:
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 def forward_matrix(x, weight_hidden, weight_output):
-
     # add bias input
     x_with_bias = np.append(x, 1)  # now x has 5 numbers
 
@@ -51,7 +49,6 @@ def forward_matrix(x, weight_hidden, weight_output):
 
     return hidden_with_bias, final_output
 
-# step 3:
 # Cited from Copilot
 def sigmoid_derivative(x):
     return x * (1 - x)
@@ -248,8 +245,6 @@ def evaluate(state):
 
     return max(0.0, min(1.0, smooth_score(raw_score)))
 
-# step 4:
-# training data (from PartA_TrainingData.txt)
 from GameState import GameState
 
 training_states = [GameState.getBasicState() for _ in range(50)]
@@ -378,22 +373,11 @@ class AIPlayer(Player):
     # creates a node dictionary with state, move, depth, and evaluation.
     ##
     def makeNode(self, move, state, depth, parent):
-        # map the game state to network input
-        x = mapStateToInput(state)
-
-        # load or initialize weights (hard-code these later in Part B step 3)
-        np.random.seed(0)
-        w_hidden = np.random.uniform(-1, 1, (16, 10 + 1))
-        w_output = np.random.uniform(-1, 1, (1, 16 + 1))
-
-        _, y = forward_matrix(x, w_hidden, w_output)
-        eval_value = float(y[0]) + depth
-
         return {
             "move": move,
             "state": state,
             "depth": depth,
-            "eval": eval_value,
+            "eval": self.utility(state) + depth,
             "parent": parent
         }
     
@@ -425,17 +409,12 @@ class AIPlayer(Player):
     #Return: The Move to be made
     ##
     def getMove(self, currentState):
-        # Part B start 
-
-        # a.
         frontierNodes = []
 
-        # b.
         rootNode = self.makeNode(None, currentState, 0, None) # root node is depth 0 and has no parent node
         frontierNodes.append(rootNode)
 
-        # c.
-        A_STAR_DEPTH = 3 # Can't change this (must search depth 3)
+        A_STAR_DEPTH = 3 
         for i in range(0, A_STAR_DEPTH):
             lowestNode = frontierNodes[0]
             for node in frontierNodes:
@@ -446,7 +425,6 @@ class AIPlayer(Player):
             nodeList = self.expandNode(lowestNode)
             for node in nodeList:
                 frontierNodes.append(node)
-        # d.
         
         bestList = []
         lowestNode = frontierNodes[0]
