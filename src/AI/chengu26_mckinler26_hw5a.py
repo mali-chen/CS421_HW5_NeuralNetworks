@@ -16,63 +16,282 @@ import math
 # Date: Nov. 11, 2025
 # Authors: Malissa Chen and Rhiannon McKinley
 
-# step 1: 
-def mapStateToInput(gameState):
-    myInv = getCurrPlayerInventory(gameState)
-    enemyInv = getEnemyInv(None, gameState)
+# step 1:
+# network structure
+num_input = 10
+num_hidden = 8
+num_output = 1
 
-    myFood = myInv.foodCount / 11.0
-    enemyFood = enemyInv.foodCount / 11.0
-    myWorkers = len(getAntList(gameState, myInv.player, (WORKER,))) / 5.0
-    enemyWorkers = len(getAntList(gameState, enemyInv.player, (WORKER,))) / 5.0
-    mySoldiers = len(getAntList(gameState, myInv.player, (SOLDIER, DRONE, R_SOLDIER))) / 5.0
-    enemySoldiers = len(getAntList(gameState, enemyInv.player, (SOLDIER, DRONE, R_SOLDIER))) / 5.0
-    anthillHealth = myInv.getAnthill().captureHealth / 3.0
-    enemyAnthillHealth = enemyInv.getAnthill().captureHealth / 3.0
-    queenHealth = myInv.getQueen().health / 10.0
-    enemyQueenHealth = enemyInv.getQueen().health / 10.0
-
-    return np.array([
-        myFood, enemyFood,
-        myWorkers, enemyWorkers,
-        mySoldiers, enemySoldiers,
-        anthillHealth, enemyAnthillHealth,
-        queenHealth, enemyQueenHealth
-    ])
+# initialize weights
+np.random.seed(0)
+weight_hidden = np.random.uniform(-1.0, 1.0, (num_hidden, num_input + 1))
+weight_output = np.random.uniform(-1.0, 1.0, (num_output, num_hidden + 1))
 
 # step 2:
 def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
+def forward_matrix(x, weight_hidden, weight_output):
+
+    # add bias input
+    x_with_bias = np.append(x, 1)  # now x has 5 numbers
+
+    # calculate hidden layer signals using matrix multiplication
+    hidden_inputs = np.dot(weight_hidden, x_with_bias)  
+
+    # apply sigmoid to get hidden layer outputs 
+    hidden_outputs = sigmoid(hidden_inputs)
+
+    # add bias to hidden layer outputs (for the output layer’s bias)
+    hidden_with_bias = np.append(hidden_outputs, 1)  # now has 9 numbers
+
+    # Calculate final output
+    final_input = np.dot(weight_output, hidden_with_bias)  
+    final_output = sigmoid(final_input)             
+
+    return hidden_with_bias, final_output
+
+# step 3:
+# Cited from Copilot
 def sigmoid_derivative(x):
     return x * (1 - x)
 
-def forward_matrix(x, w_hidden, w_output):
-    """Forward pass for a 2-layer net."""
-    x_b = np.append(x, 1) # bias
-    h_in = np.dot(w_hidden, x_b)
-    h_out = sigmoid(h_in)
-    h_b = np.append(h_out, 1) # bias for output
-    y_in = np.dot(w_output, h_b)
-    y_out = sigmoid(y_in)
-    return h_b, y_out
+def backpropagation(x, target, weight_hidden, weight_output, learning_rate=0.5):
+    # Forward pass
+    h_b, y = forward_matrix(x, weight_hidden, weight_output)
 
-def backpropagation(x, target, w_hidden, w_output, lr=0.3):
-    h_b, y = forward_matrix(x, w_hidden, w_output)
-    y = y[0]
-    error = target - y
-    delta_output = error * y * (1 - y)
+    # Compute output error
+    error_output = target - y  
+    delta_output = error_output * sigmoid_derivative(y)  
 
-    h = h_b[:-1]
-    w_out_no_bias = w_output[:, :-1]
-    delta_hidden = (delta_output * w_out_no_bias.flatten()) * h * (1 - h)
+    # Compute hidden layer error
+    h = h_b[:-1]  # remove bias from hidden output
+    weight_output_no_bias = weight_output[:, :-1]  
+    error_hidden = delta_output.dot(weight_output_no_bias) 
+    delta_hidden = error_hidden * sigmoid_derivative(h) 
 
-    # update weights
-    w_output += lr * delta_output * h_b
-    x_b = np.append(x, 1)
-    w_hidden += lr * np.outer(delta_hidden, x_b)
-    return w_hidden, w_output, error**2
+    # Update output weights
+    weight_output += learning_rate * delta_output.reshape(-1, 1) * h_b.reshape(1, -1)
 
+    # Prepare input with bias
+    x_b = np.append(x, 1)  # shape (5,)
+    # Update hidden weights
+    weight_hidden += learning_rate * delta_hidden.reshape(-1, 1) * x_b.reshape(1, -1)
+
+    return weight_hidden, weight_output
+
+# get features from gamestate
+def extract_features(state):
+    player_id = state.whoseTurn
+    opponent_id = 1 - player_id
+    my_inv = state.inventories[player_id]
+    opp_inv = state.inventories[opponent_id]
+
+    food_diff = my_inv.foodCount - opp_inv.foodCount
+    food_input = (food_diff + 2) / 4.0
+
+    combat_types = (DRONE, SOLDIER, R_SOLDIER)
+    
+    def effective_health(a): return a.health + 7 if a.type == R_SOLDIER else a.health
+    my_army = sum(effective_health(a) for a in my_inv.ants if a.type in combat_types)
+    opp_army = sum(effective_health(a) for a in opp_inv.ants if a.type in combat_types)
+    army_score = 0.5 + 0.5 * (my_army - opp_army) / max(my_army + opp_army, 1)
+
+    def worker_factor(ants):
+        count = len([a for a in ants if a.type == WORKER])
+        return 0.1 if count == 0 else 0.6 if count == 1 else 1.0 if count == 2 else 0.5
+    my_worker_score = worker_factor(my_inv.ants)
+    opp_worker_score = worker_factor(opp_inv.ants)
+
+    task_score = 0.5
+
+    queen = my_inv.getQueen()
+    enemy_queen = opp_inv.getQueen()
+    my_hill = my_inv.getAnthill()
+    opp_hill = opp_inv.getAnthill()
+    queen_score = (queen.health / 10.0) if queen else 0
+    my_hill_score = min(max((my_hill.captureHealth / 3.0) if my_hill else 0, 0), 1)
+    opp_hill_score = min(max((opp_hill.captureHealth / 3.0) if opp_hill else 0, 0), 1)
+
+    def dist_score(ants, targets):
+        targets = [t for t in targets if t]
+        if not ants or not targets:
+            return 0.5
+        dists = [approxDist(a.coords, t.coords) for a in ants for t in targets]
+        min_d, avg_d = min(dists), sum(dists) / len(dists)
+        return (1 / (1 + min_d) + 1 / (1 + avg_d)) / 2
+
+    attack_targets = [enemy_queen, opp_hill] + [a for a in opp_inv.ants if a.type == WORKER]
+    threat_targets = [queen, my_hill]
+    attack_score = dist_score(getAntList(state, player_id, combat_types), attack_targets)
+    threat_score = dist_score(getAntList(state, opponent_id, combat_types), threat_targets)
+
+    return np.array([
+        food_input,
+        army_score,
+        my_worker_score,
+        1 - opp_worker_score,
+        task_score,
+        queen_score,
+        1 - my_hill_score,
+        1 - opp_hill_score,
+        attack_score,
+        1 - threat_score
+    ])
+
+def evaluate(state):
+    # compute a normalized utility score for a given state
+    player_id = state.whoseTurn
+    opponent_id = 1 - player_id
+
+    my_inv = state.inventories[player_id]
+    opp_inv = state.inventories[opponent_id]
+
+    # food comparison
+    food_diff = my_inv.foodCount - opp_inv.foodCount
+    food_score = 0.5 + 0.5 * food_diff / max(abs(food_diff) + 2, 2)
+
+    # army strength
+    combat_types = (DRONE, SOLDIER, R_SOLDIER)
+
+    def effective_health(a):
+        return a.health + 7 if a.type == R_SOLDIER else a.health
+
+    my_army = sum(effective_health(a) for a in my_inv.ants if a.type in combat_types)
+    opp_army = sum(effective_health(a) for a in opp_inv.ants if a.type in combat_types)
+    army_score = 0.5 + 0.5 * (my_army - opp_army) / max(my_army + opp_army, 1)
+
+    # worker evaluation
+    def worker_factor(ants):
+        count = len([a for a in ants if a.type == WORKER])
+        if count == 0:
+            return 0.1
+        if count == 1:
+            return 0.6
+        if count == 2:
+            return 1.0
+        return 0.5
+
+    my_worker_score = worker_factor(my_inv.ants)
+    opp_worker_score = worker_factor(opp_inv.ants)
+    worker_score = 0.67 * my_worker_score + 0.33 * (1 - opp_worker_score)
+
+    # worker tasks
+    food_bonus, pickup_prox, delivery_prox = 0, 0.5, 0.5
+    my_workers = [a for a in my_inv.ants if a.type == WORKER]
+
+    if my_workers:
+        distances = []
+        hill_and_tunnels = [my_inv.getAnthill()] + my_inv.getTunnels()
+        foods = getConstrList(state, NEUTRAL, [FOOD])
+
+        for w in my_workers:
+            if w.carrying:
+                food_bonus += 0.3
+                if hill_and_tunnels:
+                    distances.append(min(approxDist(w.coords, d.coords) for d in hill_and_tunnels if d))
+            elif foods:
+                distances.append(min(approxDist(w.coords, f.coords) for f in foods))
+
+        if distances:
+            closest, avg_dist = min(distances), sum(distances) / len(distances)
+            delivery_prox = 1 / (1 + closest)
+            pickup_prox = 1 / (1 + avg_dist)
+
+        deposit_bonus = sum(
+            0.5 for w in my_workers if w.carrying and any(w.coords == d.coords for d in [my_inv.getAnthill()] + my_inv.getTunnels() if d)
+        )
+        task_score = 0.3 * pickup_prox + 0.2 * delivery_prox + food_bonus + deposit_bonus
+    else:
+        task_score = 0
+
+    # queen and hill factors
+    queen = my_inv.getQueen()
+    enemy_queen = opp_inv.getQueen()
+    my_hill = my_inv.getAnthill()
+    opp_hill = opp_inv.getAnthill()
+
+    queen_score = (queen.health / 10.0) if queen else 0
+    my_hill_score = min(max((my_hill.captureHealth / 3.0) if my_hill else 0, 0), 1)
+    opp_hill_score = min(max((opp_hill.captureHealth / 3.0) if opp_hill else 0, 0), 1)
+
+    def smooth_score(x, scale=6):
+        # converts a raw score into value between 0 and 1
+        return 1.0 / (1.0 + math.exp(-scale * (x - 0.5)))
+
+    # distances to attack and threats
+    def dist_score(ants, targets):
+        targets = [t for t in targets if t is not None]
+        if not ants or not targets:
+            return 0.5
+        dists = [approxDist(a.coords, t.coords) for a in ants for t in targets]
+        min_d, avg_d = min(dists), sum(dists) / len(dists)
+        return (1 / (1 + min_d) + 1 / (1 + avg_d)) / 2
+
+    attack_targets = [enemy_queen, opp_hill] + [a for a in opp_inv.ants if a.type == WORKER]
+    threat_targets = [queen, my_hill]
+    attack_score = dist_score(getAntList(state, player_id, combat_types), attack_targets)
+    threat_score = dist_score(getAntList(state, opponent_id, combat_types), threat_targets)
+
+    # combine scores
+    raw_score = (
+        0.30 * food_score +
+        0.20 * worker_score +
+        0.10 * task_score +
+        0.15 * army_score +
+        0.10 * queen_score +
+        0.05 * (1 - my_hill_score) +
+        0.05 * (1 - opp_hill_score) +
+        0.05 * attack_score -
+        0.05 * threat_score
+    )
+
+    return max(0.0, min(1.0, smooth_score(raw_score)))
+
+# step 4:
+# training data (from PartA_TrainingData.txt)
+from GameState import GameState
+
+training_states = [GameState.getBasicState() for _ in range(50)]
+
+examples = [(extract_features(state), [evaluate(state)]) for state in training_states]
+
+
+# training loop
+max_epochs = 1000
+epoch = 0
+average_error = 1.0
+
+while average_error > 0.05 and epoch < max_epochs:
+    total_error = 0.0
+    # randomly pick 10 examples each epoch
+    samples = random.sample(examples, 10)
+
+    # train on each sample
+    for x, target in samples:
+        x = np.array(x)
+        target = np.array(target)
+
+        # forward + backprop update
+        weight_hidden, weight_output = backpropagation(x, target, weight_hidden, weight_output, learning_rate= 0.5)
+
+        # calculate network output
+        _, output = forward_matrix(x, weight_hidden, weight_output)
+        sample_error = (target - output) ** 2
+        total_error += sample_error
+
+        # update global weights
+        weight_hidden, weight_output = weight_hidden, weight_output
+
+    # compute average error for this epoch
+    average_error = total_error.mean()
+    epoch += 1
+    print(f"Epoch {epoch}: Avg Error = {average_error:.4f}")
+
+    def get_utility_score(state):
+        features = extract_features(state)
+        _, output = forward_matrix(features, weight_hidden, weight_output)
+        return output[0]
 
 ##
 #AIPlayer
