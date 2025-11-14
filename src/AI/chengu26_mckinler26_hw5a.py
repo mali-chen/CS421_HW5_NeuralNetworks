@@ -19,7 +19,7 @@ import math
 # step 1:
 # network structure
 num_input = 10
-num_hidden = 8
+num_hidden = 16
 num_output = 1
 
 # initialize weights
@@ -32,7 +32,7 @@ def sigmoid(x):
 
 def forward_matrix(x, weight_hidden, weight_output):
     # add bias input
-    x_with_bias = np.append(x, 1)  # now x has 5 numbers
+    x_with_bias = np.append(x, 1.0) 
 
     # calculate hidden layer signals using matrix multiplication
     hidden_inputs = np.dot(weight_hidden, x_with_bias)  
@@ -41,7 +41,7 @@ def forward_matrix(x, weight_hidden, weight_output):
     hidden_outputs = sigmoid(hidden_inputs)
 
     # add bias to hidden layer outputs (for the output layer’s bias)
-    hidden_with_bias = np.append(hidden_outputs, 1)  # now has 9 numbers
+    hidden_with_bias = np.append(hidden_outputs, 1.0)  
 
     # Calculate final output
     final_input = np.dot(weight_output, hidden_with_bias)  
@@ -314,6 +314,11 @@ class AIPlayer(Player):
         self.tunnelBestDist = None
         self.bestRet = None
     
+    def get_utility_score(self, state):
+        features = extract_features(state)
+        _, output = forward_matrix(features, weight_hidden, weight_output)
+        return float(output[0])
+
     ##
     #getPlacement
     #
@@ -377,7 +382,7 @@ class AIPlayer(Player):
             "move": move,
             "state": state,
             "depth": depth,
-            "eval": self.utility(state) + depth,
+            "eval": self.get_utility_score(state) + depth,
             "parent": parent
         }
     
