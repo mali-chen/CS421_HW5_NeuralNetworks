@@ -9,7 +9,6 @@ from Move import Move
 from GameState import *
 from AIPlayerUtils import *
 import numpy as np
-import random
 import math
 
 # CS 421 - Homework 5: Part B
@@ -245,8 +244,6 @@ def evaluate(state):
 
     return max(0.0, min(1.0, smooth_score(raw_score)))
 
-from GameState import GameState
-
 training_states = [GameState.getBasicState() for _ in range(50)]
 
 examples = [(extract_features(state), [evaluate(state)]) for state in training_states]
@@ -281,12 +278,7 @@ while average_error > 0.05 and epoch < max_epochs:
     # compute average error for this epoch
     average_error = total_error.mean()
     epoch += 1
-    print(f"Epoch {epoch}: Avg Error = {average_error:.4f}")
-
-    def get_utility_score(state):
-        features = extract_features(state)
-        _, output = forward_matrix(features, weight_hidden, weight_output)
-        return output[0]
+print(f"Epoch {epoch}: Avg Error = {average_error:.4f}")
 
 ##
 #AIPlayer
@@ -444,8 +436,9 @@ class AIPlayer(Player):
             bestList.append(lowestNode)
             lowestNode = bestList[random.randint(0, len(bestList) - 1)]
 
-        while(lowestNode["parent"]["parent"] != None):
+        while lowestNode["parent"] is not None and lowestNode["parent"]["parent"] is not None:
             lowestNode = lowestNode["parent"]
+
 
         return lowestNode["move"]
 
