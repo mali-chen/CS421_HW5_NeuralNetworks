@@ -135,6 +135,54 @@ def extract_features(state):
         1 - threat_score
     ])
 
+def worker_behavior(state, worker):
+    player_id = state.whoseTurn
+    inv = state.inventories[player_id]
+
+    # get target list of food
+    foods = getConstrList(state, NEUTRAL, [FOOD])
+    dropoffs = [inv.getAnthill()] + inv.getTunnels()
+
+   # find nearest targer
+    def closest_target(from_coord, targets):
+        if not targets:
+            return None
+        best = min(targets, key=lambda t: approxDist(from_coord, t.coords))
+        return best
+
+    # if carrying food, go deliver
+    if worker.carrying:
+        drop = closest_target(worker.coords, dropoffs)
+        if drop is None:
+            return None  
+        
+        # if standing on dropoff, deposit food
+        if drop.coords == worker.coords:
+            return Move(END, None, None)
+
+        # Move toward dropoff
+        path = (worker.coords, drop.coords)
+        if path and len(path) > 1:
+            return Move(MOVE_ANT, path[1], 1)
+        return None
+
+    # not carrying food, find foods
+    food = closest_target(worker.coords, foods)
+    if food is None:
+        return None  # no food on board
+
+    # if standing on food
+    if worker.coords == food.coords:
+        return Move(END, None, None)
+
+    # move toward food
+    path = (worker.coords, food.coords)
+    if path and len(path) > 1:
+        return Move(MOVE_ANT, path[1], 1)
+
+    return None
+
+## utility function
 def evaluate(state):
     # compute a normalized utility score for a given state
     player_id = state.whoseTurn
@@ -410,7 +458,7 @@ class AIPlayer(Player):
 
         rootNode = self.makeNode(None, currentState, 0, None) # root node is depth 0 and has no parent node
         frontierNodes.append(rootNode)
-
+    
         A_STAR_DEPTH = 3 
         for i in range(0, A_STAR_DEPTH):
             lowestNode = frontierNodes[0]
