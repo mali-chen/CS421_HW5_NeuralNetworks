@@ -135,6 +135,31 @@ def extract_features(state):
         1 - threat_score
     ])
 
+# returns the next step from start moving toward goal
+# moves one tile in the direction that reduces the Manhattan distance
+    
+def nearestLocation(start, goal):
+    x1, y1 = start
+    x2, y2 = goal
+
+    dx = x2 - x1
+    dy = y2 - y1
+
+    # move 1 step horizontally if needed
+    if dx > 0:
+        return (x1 + 1, y1)
+    if dx < 0:
+        return (x1 - 1, y1)
+
+    # move 1 step vertically if horizontal is aligned
+    if dy > 0:
+        return (x1, y1 + 1)
+    if dy < 0:
+        return (x1, y1 - 1)
+
+    # already at goal
+    return start
+
 def worker_behavior(state, worker):
     player_id = state.whoseTurn
     inv = state.inventories[player_id]
@@ -158,7 +183,7 @@ def worker_behavior(state, worker):
         
         # if standing on dropoff, deposit food
         if drop.coords == worker.coords:
-            return Move(END, None, None)
+            return Move(MOVE_ANT, None, 0)   
 
         # Move toward dropoff
         path = (worker.coords, drop.coords)
@@ -178,7 +203,7 @@ def worker_behavior(state, worker):
     # move toward food
     path = (worker.coords, food.coords)
     if path and len(path) > 1:
-        return Move(MOVE_ANT, path[1], 1)
+        return Move(MOVE_ANT, nearestLocation(worker.coords, food.coords), 1)
 
     return None
 
@@ -292,41 +317,43 @@ def evaluate(state):
 
     return max(0.0, min(1.0, smooth_score(raw_score)))
 
-training_states = [GameState.getBasicState() for _ in range(50)]
+# training_states = [GameState.getBasicState() for _ in range(50)]
 
-examples = [(extract_features(state), [evaluate(state)]) for state in training_states]
+# examples = [(extract_features(state), [evaluate(state)]) for state in training_states]
 
 
-# training loop
-max_epochs = 1000
-epoch = 0
-average_error = 1.0
+# # training loop
+# max_epochs = 1000
+# epoch = 0
+# average_error = 1.0
 
-while average_error > 0.05 and epoch < max_epochs:
-    total_error = 0.0
-    # randomly pick 10 examples each epoch
-    samples = random.sample(examples, 10)
+# while average_error > 0.05 and epoch < max_epochs:
+#     total_error = 0.0
+#     # randomly pick 10 examples each epoch
+#     samples = random.sample(examples, 10)
 
-    # train on each sample
-    for x, target in samples:
-        x = np.array(x)
-        target = np.array(target)
+#     # train on each sample
+#     for x, target in samples:
+#         x = np.array(x)
+#         target = np.array(target)
 
-        # forward + backprop update
-        weight_hidden, weight_output = backpropagation(x, target, weight_hidden, weight_output, learning_rate= 0.5)
+#         # forward + backprop update
+#         weight_hidden, weight_output = backpropagation(x, target, weight_hidden, weight_output, learning_rate= 0.5)
 
-        # calculate network output
-        _, output = forward_matrix(x, weight_hidden, weight_output)
-        sample_error = (target - output) ** 2
-        total_error += sample_error
+#         # calculate network output
+#         _, output = forward_matrix(x, weight_hidden, weight_output)
+#         sample_error = (target - output) ** 2
+#         total_error += sample_error
 
-        # update global weights
-        weight_hidden, weight_output = weight_hidden, weight_output
+#         # update global weights
+#         weight_hidden, weight_output = weight_hidden, weight_output
 
-    # compute average error for this epoch
-    average_error = total_error.mean()
-    epoch += 1
-print(f"Epoch {epoch}: Avg Error = {average_error:.4f}")
+#     # compute average error for this epoch
+#     average_error = total_error.mean()
+#     epoch += 1
+# print(f"Epoch {epoch}: Avg Error = {average_error:.4f}")
+# print("Final Hidden Weights:\n", weight_hidden)
+# print("Final Output Weights:\n", weight_output)
 
 ##
 #AIPlayer
@@ -349,6 +376,48 @@ class AIPlayer(Player):
     def __init__(self, inputPlayerId):
         super(AIPlayer,self).__init__(inputPlayerId, "Network Web")
 
+        # hard coded training weights
+        self.weight_hidden = np.array([
+            [ 0.09862196,  0.43137369,  0.20572574,  0.09155729, -0.15169545,  0.29377814,
+            -0.12482558,  0.783546  ,  0.92832048, -0.23212201,  0.58543999],
+            [ 0.0536723 ,  0.13197158,  0.85036977, -0.86533946, -0.82985894, -0.96779829,
+            0.66523969,  0.5563135 ,  0.73590675,  0.95311914,  0.59008204],
+            [-0.0787361 ,  0.55936352, -0.76379011,  0.27679135, -0.71498825,  0.88594818,
+            0.04369664, -0.17067612, -0.4725836 ,  0.54677255, -0.09108899],
+            [ 0.1417715 , -0.9575168 ,  0.23625171,  0.23301793,  0.2387716 ,  0.89730336,
+            0.3636406 , -0.2809842 , -0.12103249,  0.40016599, -0.86974185],
+            [ 0.33585274,  0.34359505, -0.57877102, -0.73797265, -0.36682399, -0.26793984,
+            0.14039354, -0.12279697,  0.97906699, -0.79359107, -0.57760787],
+            [-0.67784455,  0.30575306, -0.49350951, -0.06821291, -0.5116124 , -0.68298801,
+            -0.77924972,  0.31265918, -0.72409769, -0.60729886, -0.26347683],
+            [ 0.64137126, -0.80641265,  0.67576677, -0.80891055,  0.95230373, -0.063928  ,
+            0.95352218,  0.20969104,  0.47791196, -0.92223962, -0.43561648],
+            [-0.75909879, -0.40721151, -0.76244294, -0.36311908, -0.17096592, -0.87068883,
+            0.38494424,  0.13320291, -0.46871293,  0.0470042 , -0.8111028 ],
+            [ 0.14854285,  0.85524225, -0.36353212,  0.32879051, -0.73975442,  0.42595413,
+            -0.42118781, -0.63361728,  0.16967573, -0.96313505,  0.65117978],
+            [-0.99159792,  0.3546442 , -0.46018183,  0.46860807,  0.92338821, -0.50447147,
+            0.15231467,  0.18408386,  0.14351494, -0.55482561,  0.90352027],
+            [-0.10597427,  0.69259232,  0.39891355, -0.40553114,  0.62737062, -0.20743856,
+            0.76220639,  0.16254575,  0.7632457 ,  0.38483816,  0.45005851],
+            [ 0.00185879,  0.9113773 ,  0.2878224 , -0.15371185,  0.21199646, -0.96319354,
+            -0.39685037,  0.32034707, -0.42063475,  0.23524089, -0.14404254],
+            [-0.73138524, -0.40576872,  0.13946315,  0.17754546,  0.14631713,  0.3017349 ,
+            0.30420654, -0.13716313,  0.79075982, -0.26720963, -0.13293688],
+            [ 0.78533815,  0.61387942,  0.40807546, -0.79686163,  0.84045667,  0.43146548,
+            0.99769401, -0.70110339,  0.73774356, -0.67352269,  0.23410201],
+            [-0.75138164,  0.69699485,  0.6148336 ,  0.13996258, -0.18465502, -0.85970923,
+            0.39485755, -0.09291463,  0.44508959,  0.73374304,  0.95299979],
+            [ 0.71424762, -0.97393089, -0.27951568,  0.46473481, -0.65409971,  0.04735509,
+            -0.89132402, -0.60000695, -0.96031547,  0.59003634, -0.54686875]
+        ])
+
+        self.weight_output = np.array([
+            [-0.3433716 ,  0.84076264,  0.37931765, -0.95803242, -0.67931062,  0.2386689 ,
+            0.14316103, -0.5262492 ,  0.83734084,  0.20000303,  0.04008353,  0.16642346,
+            0.43821947, -0.40755969, -0.23175306, -0.59352619, -0.66918056]
+        ])
+
         # Variables for utility
         self.anthillBestDist = None
         self.tunnelBestDist = None
@@ -356,7 +425,11 @@ class AIPlayer(Player):
     
     def get_utility_score(self, state):
         features = extract_features(state)
-        _, output = forward_matrix(features, weight_hidden, weight_output)
+        _, output = forward_matrix(
+            features,
+            self.weight_hidden,     
+            self.weight_output      
+        )
         return float(output[0])
 
     ##
@@ -422,7 +495,7 @@ class AIPlayer(Player):
             "move": move,
             "state": state,
             "depth": depth,
-            "eval": self.get_utility_score(state) + depth,
+            "eval": (self.get_utility_score(state)) + depth,
             "parent": parent
         }
     
