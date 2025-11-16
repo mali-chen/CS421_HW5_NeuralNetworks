@@ -76,247 +76,6 @@ def backpropagation(x, target, weight_hidden, weight_output, learning_rate=0.5):
 
     return weight_hidden, weight_output
 
-# get features from gamestate
-def extract_features(state):
-    player_id = state.whoseTurn
-    opponent_id = 1 - player_id
-    my_inv = state.inventories[player_id]
-    opp_inv = state.inventories[opponent_id]
-
-    food_diff = my_inv.foodCount - opp_inv.foodCount
-    food_input = (food_diff + 2) / 4.0
-
-    combat_types = (DRONE, SOLDIER, R_SOLDIER)
-    
-    def effective_health(a): return a.health + 7 if a.type == R_SOLDIER else a.health
-    my_army = sum(effective_health(a) for a in my_inv.ants if a.type in combat_types)
-    opp_army = sum(effective_health(a) for a in opp_inv.ants if a.type in combat_types)
-    army_score = 0.5 + 0.5 * (my_army - opp_army) / max(my_army + opp_army, 1)
-
-    def worker_factor(ants):
-        count = len([a for a in ants if a.type == WORKER])
-        return 0.1 if count == 0 else 0.6 if count == 1 else 1.0 if count == 2 else 0.5
-    my_worker_score = worker_factor(my_inv.ants)
-    opp_worker_score = worker_factor(opp_inv.ants)
-
-    task_score = 0.5
-
-    queen = my_inv.getQueen()
-    enemy_queen = opp_inv.getQueen()
-    my_hill = my_inv.getAnthill()
-    opp_hill = opp_inv.getAnthill()
-    queen_score = (queen.health / 10.0) if queen else 0
-    my_hill_score = min(max((my_hill.captureHealth / 3.0) if my_hill else 0, 0), 1)
-    opp_hill_score = min(max((opp_hill.captureHealth / 3.0) if opp_hill else 0, 0), 1)
-
-    def dist_score(ants, targets):
-        targets = [t for t in targets if t]
-        if not ants or not targets:
-            return 0.5
-        dists = [approxDist(a.coords, t.coords) for a in ants for t in targets]
-        min_d, avg_d = min(dists), sum(dists) / len(dists)
-        return (1 / (1 + min_d) + 1 / (1 + avg_d)) / 2
-
-    attack_targets = [enemy_queen, opp_hill] + [a for a in opp_inv.ants if a.type == WORKER]
-    threat_targets = [queen, my_hill]
-    attack_score = dist_score(getAntList(state, player_id, combat_types), attack_targets)
-    threat_score = dist_score(getAntList(state, opponent_id, combat_types), threat_targets)
-
-    return np.array([
-        food_input,
-        army_score,
-        my_worker_score,
-        1 - opp_worker_score,
-        task_score,
-        queen_score,
-        1 - my_hill_score,
-        1 - opp_hill_score,
-        attack_score,
-        1 - threat_score
-    ])
-
-# returns the next step from start moving toward goal
-# moves one tile in the direction that reduces the Manhattan distance
-    
-def nearestLocation(start, goal):
-    x1, y1 = start
-    x2, y2 = goal
-
-    dx = x2 - x1
-    dy = y2 - y1
-
-    # move 1 step horizontally if needed
-    if dx > 0:
-        return (x1 + 1, y1)
-    if dx < 0:
-        return (x1 - 1, y1)
-
-    # move 1 step vertically if horizontal is aligned
-    if dy > 0:
-        return (x1, y1 + 1)
-    if dy < 0:
-        return (x1, y1 - 1)
-
-    # already at goal
-    return start
-
-def worker_behavior(state, worker):
-    player_id = state.whoseTurn
-    inv = state.inventories[player_id]
-
-    # get target list of food
-    foods = getConstrList(state, NEUTRAL, [FOOD])
-    dropoffs = [inv.getAnthill()] + inv.getTunnels()
-
-   # find nearest targer
-    def closest_target(from_coord, targets):
-        if not targets:
-            return None
-        best = min(targets, key=lambda t: approxDist(from_coord, t.coords))
-        return best
-
-    # if carrying food, go deliver
-    if worker.carrying:
-        drop = closest_target(worker.coords, dropoffs)
-        if drop is None:
-            return None  
-        
-        # if standing on dropoff, deposit food
-        if drop.coords == worker.coords:
-            return Move(MOVE_ANT, None, 0)   
-
-        # Move toward dropoff
-        path = (worker.coords, drop.coords)
-        if path and len(path) > 1:
-            return Move(MOVE_ANT, path[1], 1)
-        return None
-
-    # not carrying food, find foods
-    food = closest_target(worker.coords, foods)
-    if food is None:
-        return None  # no food on board
-
-    # if standing on food
-    if worker.coords == food.coords:
-        return Move(END, None, None)
-
-    # move toward food
-    path = (worker.coords, food.coords)
-    if path and len(path) > 1:
-        return Move(MOVE_ANT, nearestLocation(worker.coords, food.coords), 1)
-
-    return None
-
-## utility function
-def evaluate(state):
-    # compute a normalized utility score for a given state
-    player_id = state.whoseTurn
-    opponent_id = 1 - player_id
-
-    my_inv = state.inventories[player_id]
-    opp_inv = state.inventories[opponent_id]
-
-    # food comparison
-    food_diff = my_inv.foodCount - opp_inv.foodCount
-    food_score = 0.5 + 0.5 * food_diff / max(abs(food_diff) + 2, 2)
-
-    # army strength
-    combat_types = (DRONE, SOLDIER, R_SOLDIER)
-
-    def effective_health(a):
-        return a.health + 7 if a.type == R_SOLDIER else a.health
-
-    my_army = sum(effective_health(a) for a in my_inv.ants if a.type in combat_types)
-    opp_army = sum(effective_health(a) for a in opp_inv.ants if a.type in combat_types)
-    army_score = 0.5 + 0.5 * (my_army - opp_army) / max(my_army + opp_army, 1)
-
-    # worker evaluation
-    def worker_factor(ants):
-        count = len([a for a in ants if a.type == WORKER])
-        if count == 0:
-            return 0.1
-        if count == 1:
-            return 0.6
-        if count == 2:
-            return 1.0
-        return 0.5
-
-    my_worker_score = worker_factor(my_inv.ants)
-    opp_worker_score = worker_factor(opp_inv.ants)
-    worker_score = 0.67 * my_worker_score + 0.33 * (1 - opp_worker_score)
-
-    # worker tasks
-    food_bonus, pickup_prox, delivery_prox = 0, 0.5, 0.5
-    my_workers = [a for a in my_inv.ants if a.type == WORKER]
-
-    if my_workers:
-        distances = []
-        hill_and_tunnels = [my_inv.getAnthill()] + my_inv.getTunnels()
-        foods = getConstrList(state, NEUTRAL, [FOOD])
-
-        for w in my_workers:
-            if w.carrying:
-                food_bonus += 0.3
-                if hill_and_tunnels:
-                    distances.append(min(approxDist(w.coords, d.coords) for d in hill_and_tunnels if d))
-            elif foods:
-                distances.append(min(approxDist(w.coords, f.coords) for f in foods))
-
-        if distances:
-            closest, avg_dist = min(distances), sum(distances) / len(distances)
-            delivery_prox = 1 / (1 + closest)
-            pickup_prox = 1 / (1 + avg_dist)
-
-        deposit_bonus = sum(
-            0.5 for w in my_workers if w.carrying and any(w.coords == d.coords for d in [my_inv.getAnthill()] + my_inv.getTunnels() if d)
-        )
-        task_score = 0.3 * pickup_prox + 0.2 * delivery_prox + food_bonus + deposit_bonus
-    else:
-        task_score = 0
-
-    # queen and hill factors
-    queen = my_inv.getQueen()
-    enemy_queen = opp_inv.getQueen()
-    my_hill = my_inv.getAnthill()
-    opp_hill = opp_inv.getAnthill()
-
-    queen_score = (queen.health / 10.0) if queen else 0
-    my_hill_score = min(max((my_hill.captureHealth / 3.0) if my_hill else 0, 0), 1)
-    opp_hill_score = min(max((opp_hill.captureHealth / 3.0) if opp_hill else 0, 0), 1)
-
-    def smooth_score(x, scale=6):
-        # converts a raw score into value between 0 and 1
-        return 1.0 / (1.0 + math.exp(-scale * (x - 0.5)))
-
-    # distances to attack and threats
-    def dist_score(ants, targets):
-        targets = [t for t in targets if t is not None]
-        if not ants or not targets:
-            return 0.5
-        dists = [approxDist(a.coords, t.coords) for a in ants for t in targets]
-        min_d, avg_d = min(dists), sum(dists) / len(dists)
-        return (1 / (1 + min_d) + 1 / (1 + avg_d)) / 2
-
-    attack_targets = [enemy_queen, opp_hill] + [a for a in opp_inv.ants if a.type == WORKER]
-    threat_targets = [queen, my_hill]
-    attack_score = dist_score(getAntList(state, player_id, combat_types), attack_targets)
-    threat_score = dist_score(getAntList(state, opponent_id, combat_types), threat_targets)
-
-    # combine scores
-    raw_score = (
-        0.30 * food_score +
-        0.20 * worker_score +
-        0.10 * task_score +
-        0.15 * army_score +
-        0.10 * queen_score +
-        0.05 * (1 - my_hill_score) +
-        0.05 * (1 - opp_hill_score) +
-        0.05 * attack_score -
-        0.05 * threat_score
-    )
-
-    return max(0.0, min(1.0, smooth_score(raw_score)))
-
 # training_states = [GameState.getBasicState() for _ in range(50)]
 
 # examples = [(extract_features(state), [evaluate(state)]) for state in training_states]
@@ -417,20 +176,170 @@ class AIPlayer(Player):
             0.14316103, -0.5262492 ,  0.83734084,  0.20000303,  0.04008353,  0.16642346,
             0.43821947, -0.40755969, -0.23175306, -0.59352619, -0.66918056]
         ])
-
-        # Variables for utility
-        self.anthillBestDist = None
-        self.tunnelBestDist = None
-        self.bestRet = None
     
-    def get_utility_score(self, state):
-        features = extract_features(state)
-        _, output = forward_matrix(
-            features,
-            self.weight_hidden,     
-            self.weight_output      
-        )
-        return float(output[0])
+    ####################################################################
+    ## CREDIT: Andrew Asch's utility function, permission from Dr.Nuxoll
+    ####################################################################
+    #utility
+    #Description: Determines how (un)/favorable the current game state is to player
+    #
+    #Parameters:
+    #   currentState - A clone of the current state (GameState)
+    ##
+    def utility(self, currentState):
+        #get pointers
+        me = currentState.whoseTurn
+        them = 1 - me
+
+        myAttAnts = getAntList(currentState, me, (DRONE, SOLDIER, R_SOLDIER))
+        myDrones = getAntList(currentState, me, (DRONE,))
+        mySoldiers = getAntList(currentState, me, (SOLDIER,))
+        myRSoldiers = getAntList(currentState, me, (R_SOLDIER,))
+        myDefAnts = getAntList(currentState, me, (DRONE, SOLDIER, R_SOLDIER, QUEEN))
+        myWorkers = getAntList(currentState, me, (WORKER,))
+
+        theirAnts = getAntList(currentState, them, (DRONE, SOLDIER, R_SOLDIER))
+        theirWorkers = getAntList(currentState, them, (WORKER,))
+
+        myFood = currentState.inventories[me].foodCount
+        myBuildObjs = getConstrList(currentState, me, (ANTHILL, TUNNEL))
+        myAnthill = currentState.inventories[me].getAnthill()
+        foodObjs = getConstrList(currentState, None, (FOOD,))
+        theirFood = currentState.inventories[them].foodCount
+        theirAnthill = currentState.inventories[them].getAnthill()
+        
+        try:
+            myQueen = getAntList(currentState, me, (QUEEN,))[0]
+            myQueenHealth = myQueen.health
+        except IndexError:
+            myQueenHealth = 1 #queen is dead
+        
+        try:  
+            theirQueen = getAntList(currentState, them, (QUEEN,))[0]
+            theirQueenHealth = theirQueen.health
+        except IndexError:
+            theirQueenHealth = 1
+        
+
+        #NOTE: comparitive advantages
+        troopAdv = len(myAttAnts) - len(theirAnts) #incentivises placing troops
+        healthAdv = (myAnthill.captureHealth*4 + myQueenHealth) - \
+            (theirAnthill.captureHealth*4 + theirQueenHealth)
+        foodAdv = (myFood - theirFood)
+        
+        #NOTE: small movement/productivity utility bumps
+        #incentivises soldiers (reap the most benefit with least amount of strat)
+        antVal = len(mySoldiers)*2 + len(myRSoldiers) + len(myDrones) 
+
+        #incetivises having 1 worker
+        workerVal = min(len(myWorkers), 1) 
+        
+        #workers should be incentivised to be productive
+        stepsFromFood = [0]
+        stepsFromBuilding = [0]
+        carryingWorkers=0
+        for w in myWorkers: 
+            if w.carrying:
+                carryingWorkers += 1
+                #find the closest building to each worker and incentivise moving towards
+                stepsMinB = stepsToReach(currentState, w.coords, myBuildObjs[0].coords)
+                for b in myBuildObjs:
+                    if stepsMinB > stepsToReach(currentState, w.coords, b.coords):
+                        stepsMinB = stepsToReach(currentState, w.coords, b.coords)
+                stepsFromBuilding.append(stepsMinB)
+                    
+            else: 
+                #find the closest food to each worker and incentivise moving towards
+                stepsMinF = 999
+                for f in foodObjs:
+                    if stepsMinF > stepsToReach(currentState, w.coords, f.coords) \
+                        and f.coords[1] < 4:
+                        stepsMinF = stepsToReach(currentState, w.coords, f.coords)
+                stepsFromFood.append(stepsMinF)
+        
+        #when workers are close to goal, provide a small bump to utility
+        #we also need to incentivise having the worker pick up and set
+        #down the food. If the worker is 1 distance away from the food,
+        #it knows that picking it up will shift the goal from the food 
+        #to the building. When the worker picks up the food it is further
+        #from the new goal, and utility is subtracted. To make the worker 
+        #actually reach the goals, we incetivised having workers carrying 
+        #food over any possible distance incentive, and getting us food. 
+        workerMvmt = (1/(sum(stepsFromFood) + sum(stepsFromBuilding) + 1) + \
+                        carryingWorkers + myFood*2)
+
+        #drone, soldier, and rsoldier should be insentivised to advance
+        moveForward = sum([min(ant.coords[1], 7) for ant in myAttAnts]) - \
+                        sum([min(9-ant.coords[1], 7) for ant in theirAnts])
+        
+        #drone, soldier, rsoldier and queen should be incetivised to defend 
+        #when they aren't yet in enemy territory. When they take health off
+        #attacking troops, they move is further rewarded. 
+        threats = []
+        for ant in theirAnts:
+            if ant.coords[1] < 6:
+                threats.append(ant)
+                
+        protectQ = 0
+        if len(threats) > 0:
+            defend = sum([1/stepsToReach(currentState, ant.coords, 
+                                            threats[0].coords) for ant in myDefAnts \
+                                            if ant.coords[1] < 6])-threats[0].health
+            #make sure the queen doesn't defend when she is a one shot
+            if myQueenHealth <=5: 
+                protectQ = min([stepsToReach(currentState, 
+                                                t.coords, 
+                                                myQueen.coords) for t in threats])
+
+        else: defend = 0
+
+        #incentivise getting closer to and killing workers
+        theirWorkerCount = -len(theirWorkers)
+        distFromWorkers = []
+        distFromQueen = []
+        for ant in myAttAnts:
+            try:
+                distFromWorkers.append(-min([stepsToReach(currentState, 
+                                                            ant.coords, 
+                                                w.coords) for w in theirWorkers]))
+            except ValueError:
+                pass #they have no workers left
+            try:
+                distFromQueen.append(-abs(ant.coords[0] - theirQueen.coords[0]) + \
+                                        -abs(ant.coords[1] - theirQueen.coords[1]))
+            except UnboundLocalError:
+                pass #queen is dead
+
+        attackWorkers = theirWorkerCount + sum(distFromWorkers)/10
+        attackQueen = -theirQueenHealth + sum(distFromQueen)/10
+        
+        #using arbitary weights so that variables interact with each other in the 
+        #way we expect
+        realAdv = troopAdv/5 + healthAdv/15 + foodAdv/50
+        gameplayIncentives = workerMvmt/1000 + antVal/1000 + moveForward/10000 + \
+            defend/100 + workerVal/10 + protectQ/100 + attackWorkers/100 + \
+            attackQueen/1000
+
+        #need to scale output (using min/max)
+        # NOTE: ran at least 500 against all the agents provided and the ones
+        #that we made. We also played against the AI ourselves to 
+        # inflate/deflate utility in a utility that would reasonably occur 
+        # within gameplay. These were our max and min util values
+        # with a bit of safety buffer added on top. 
+        # NOTE: when we tested manually, we were able to generate utilities 
+        # of less than -10. In these situations the game is so disadvantageous 
+        # to us, that we are fine accepting the loss and bounding at a more 
+        # reasonable -1.5 in these extremely rare instances.
+        minUtil = -1.5
+        maxUtil = 1.75
+        scaleUtil = ((realAdv + gameplayIncentives) - minUtil) / (maxUtil - minUtil)
+
+        #bite the bullet and bound util if it every leaves range
+        #should be incredibly rare 
+        scaleUtil = max(scaleUtil, 0)
+        scaleUtil = min(scaleUtil, 1)
+
+        return scaleUtil
 
     ##
     #getPlacement
@@ -485,7 +394,7 @@ class AIPlayer(Player):
             return moves
         else:
             return [(0, 0)]
-    
+        
     ##
     # makeNode
     # creates a node dictionary with state, move, depth, and evaluation.
@@ -495,7 +404,7 @@ class AIPlayer(Player):
             "move": move,
             "state": state,
             "depth": depth,
-            "eval": (self.get_utility_score(state)) + depth,
+            "eval": self.utility(state) + depth, 
             "parent": parent
         }
     
@@ -531,7 +440,7 @@ class AIPlayer(Player):
 
         rootNode = self.makeNode(None, currentState, 0, None) # root node is depth 0 and has no parent node
         frontierNodes.append(rootNode)
-    
+
         A_STAR_DEPTH = 3 
         for i in range(0, A_STAR_DEPTH):
             lowestNode = frontierNodes[0]
