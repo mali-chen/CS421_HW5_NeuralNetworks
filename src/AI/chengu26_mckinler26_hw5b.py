@@ -79,7 +79,87 @@ def backpropagation(x, target, weight_hidden, weight_output, learning_rate=0.5):
 # training_states = [GameState.getBasicState() for _ in range(50)]
 
 # examples = [(extract_features(state), [evaluate(state)]) for state in training_states]
+def extract_features(state):
+    me = state.whoseTurn
+    inv = state.inventories[me]
+    enemy = state.inventories[1 - me]
 
+    # ----- Gather ants -----
+    my_workers = [a for a in inv.ants if a.type == WORKER]
+    my_soldiers = [a for a in inv.ants if a.type in (SOLDIER, R_SOLDIER)]
+    my_queen = next((a for a in inv.ants if a.type == QUEEN), None)
+
+    # ----- Distances -----
+    def dist(a, b):
+        return abs(a.coords[0] - b.coords[0]) + abs(a.coords[1] - b.coords[1])
+
+    # closest food
+    if my_workers:
+        worker = my_workers[0]
+        foods = [c for c in state.inventories[me].constrs if c.type == FOOD]
+        food_dists = [dist(worker, f) for f in foods]
+        min_food_dist = float(min(food_dists)) if food_dists else 10.0
+    else:
+        min_food_dist = 10.0
+
+    # worker to tunnel
+    tunnels = [c for c in inv.constrs if c.type == TUNNEL]
+    worker_home_dist = dist(worker, tunnels[0]) if (my_workers and tunnels) else 10.0
+
+    # worker carrying food
+    worker_carry = 1.0 if (my_workers and my_workers[0].carrying) else 0.0
+
+    # enemy hill pressure
+    enemy_hill = next((c for c in enemy.constrs if c.type == ANTHILL), None)
+
+    hill_pressure = float(min((dist(a, enemy_hill) for a in inv.ants), default=10)) if enemy_hill else 10.0
+
+    # queen health 
+    queen_health = (my_queen.health / UNIT_STATS[QUEEN][HEALTH]) if my_queen else 0.0
+
+    # food count
+    food_count = float(inv.foodCount)
+
+    # number of ants
+    num_workers = float(len(my_workers))
+    num_soldiers = float(len(my_soldiers))
+
+    # squared values for depth
+    food_dist_sq = min_food_dist * min_food_dist
+
+    # Normalization caps 
+    MAX_DIST = 20.0          
+    MAX_FOOD = 10.0        
+    MAX_ANTS = 12.0        
+    MAX_DIST_SQ = MAX_DIST * MAX_DIST
+
+    # Normalize into 0..1
+    nf_min_food_dist = min(min_food_dist / MAX_DIST, 1.0)
+    nf_worker_home = min(worker_home_dist / MAX_DIST, 1.0)
+    nf_worker_carry = worker_carry  # already 0/1
+    nf_hill_pressure = 1.0 - min(hill_pressure / MAX_DIST, 1.0)  # smaller distance = more pressure => larger feature
+    nf_queen_health = min(max(queen_health, 0.0), 1.0)
+    nf_food_count = min(food_count / MAX_FOOD, 1.0)
+    nf_num_workers = min(num_workers / MAX_ANTS, 1.0)
+    nf_num_soldiers = min(num_soldiers / MAX_ANTS, 1.0)
+    nf_food_dist_sq = min(food_dist_sq / MAX_DIST_SQ, 1.0)
+
+
+    # FINAL 10 FEATURES
+    features = np.array([
+        nf_min_food_dist,
+        nf_worker_home,
+        nf_worker_carry,
+        nf_hill_pressure,
+        nf_queen_health,
+        nf_food_count,
+        nf_num_workers,
+        nf_num_soldiers,
+        nf_food_dist_sq,
+        1.0,   
+    ], dtype=float)
+
+    return features
 
 # # training loop
 # max_epochs = 1000
@@ -176,7 +256,7 @@ class AIPlayer(Player):
             0.14316103, -0.5262492 ,  0.83734084,  0.20000303,  0.04008353,  0.16642346,
             0.43821947, -0.40755969, -0.23175306, -0.59352619, -0.66918056]
         ])
-    
+
     ####################################################################
     ## CREDIT: Andrew Asch's utility function, permission from Dr.Nuxoll
     ####################################################################
@@ -339,7 +419,24 @@ class AIPlayer(Player):
         scaleUtil = max(scaleUtil, 0)
         scaleUtil = min(scaleUtil, 1)
 
-        return scaleUtil
+        # neural network evaluation
+        # extract feature vector
+        x = np.array(extract_features(currentState))
+
+        # forward pass through the trained network
+        _, nn_output = forward_matrix(x, self.weight_hidden, self.weight_output)
+
+        # combine the original utility and neural network output
+        alpha = 0.7  
+        combined = alpha * nn_output + (1 - alpha) * scaleUtil
+
+        # neural network evaluation
+        x = np.array(extract_features(currentState))
+        
+        # forward pass using hard-coded weights
+        _, nn_output = forward_matrix(x, self.weight_hidden, self.weight_output)
+
+        return float(np.clip(nn_output, 0.0, 1.0))
 
     ##
     #getPlacement
@@ -399,14 +496,44 @@ class AIPlayer(Player):
     # makeNode
     # creates a node dictionary with state, move, depth, and evaluation.
     ##
-    def makeNode(self, move, state, depth, parent):
-        return {
-            "move": move,
-            "state": state,
-            "depth": depth,
-            "eval": self.utility(state) + depth, 
-            "parent": parent
-        }
+    def makeNode(self, currentState, move, depth):
+        nextState = getNextState(currentState, move)
+        
+        return {"move": move, 
+                "state": nextState, 
+                "depth": depth, 
+                "eval": self.utility(nextState) + depth, 
+                "parent": currentState}
+    
+    ##
+    #bestMove
+    #Description: Takes a list of all possible nodes from a gameState and
+    #   returns the node that will provide the AI with maximum utility. 
+    #   When multiple moves provide the same utility, a random one is returned.
+    #   This prevents cyclical behavior in the code.
+    #
+    #Parameters:
+    #   nodeList - a list of the nodes that would result from all the possible
+    #               moves from this gameState
+    ##
+    def bestMove(self, nodeList):
+        maxScore = []
+        maxNode = []
+        
+        #add all moves to the list that tentatively are the best
+        for i in nodeList:
+            if len(maxScore) == 0 or i['eval'] == maxScore[0]:
+                maxScore.append(i["eval"])
+                maxNode.append(i["move"])
+
+            #if there is a new best, clear the lists
+            if i['eval'] > maxScore[0]:
+                maxScore = []
+                maxNode = []
+                maxScore.append(i['eval'])
+                maxNode.append(i["move"])
+        
+        return random.choice(maxNode)
     
     ##
     # expandNode
@@ -421,7 +548,7 @@ class AIPlayer(Player):
 
         for m in moves:
             nextState = getNextState(initNode["state"], m)
-            node = self.makeNode(m, nextState, initNode["depth"] + 1, initNode)
+            node = self.makeNode(initNode["state"], m, initNode["depth"] + 1)
             nodes.append(node)
 
         return nodes
@@ -436,41 +563,10 @@ class AIPlayer(Player):
     #Return: The Move to be made
     ##
     def getMove(self, currentState):
-        frontierNodes = []
-
-        rootNode = self.makeNode(None, currentState, 0, None) # root node is depth 0 and has no parent node
-        frontierNodes.append(rootNode)
-
-        A_STAR_DEPTH = 3 
-        for i in range(0, A_STAR_DEPTH):
-            lowestNode = frontierNodes[0]
-            for node in frontierNodes:
-                if node["eval"] < lowestNode["eval"]:
-                    lowestNode = node
-
-            frontierNodes.remove(lowestNode)
-            nodeList = self.expandNode(lowestNode)
-            for node in nodeList:
-                frontierNodes.append(node)
+        moves = listAllLegalMoves(currentState)
+        nodeList = [self.makeNode(currentState, m, 1) for m in moves]
         
-        bestList = []
-        lowestNode = frontierNodes[0]
-        for node in frontierNodes:
-            if node["eval"] < lowestNode["eval"]:
-                lowestNode = node
-                bestList.clear()
-            if node["eval"] == lowestNode["eval"]:
-                bestList.append(node)
-        
-        if len(bestList) > 0 :
-            bestList.append(lowestNode)
-            lowestNode = bestList[random.randint(0, len(bestList) - 1)]
-
-        while lowestNode["parent"] is not None and lowestNode["parent"]["parent"] is not None:
-            lowestNode = lowestNode["parent"]
-
-
-        return lowestNode["move"]
+        return self.bestMove(nodeList)
 
     ##
     #getAttack
