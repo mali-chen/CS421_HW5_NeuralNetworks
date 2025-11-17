@@ -84,12 +84,12 @@ def extract_features(state):
     inv = state.inventories[me]
     enemy = state.inventories[1 - me]
 
-    # ----- Gather ants -----
+    # gqther ants 
     my_workers = [a for a in inv.ants if a.type == WORKER]
     my_soldiers = [a for a in inv.ants if a.type in (SOLDIER, R_SOLDIER)]
     my_queen = next((a for a in inv.ants if a.type == QUEEN), None)
 
-    # ----- Distances -----
+    # distances 
     def dist(a, b):
         return abs(a.coords[0] - b.coords[0]) + abs(a.coords[1] - b.coords[1])
 
@@ -127,13 +127,13 @@ def extract_features(state):
     # squared values for depth
     food_dist_sq = min_food_dist * min_food_dist
 
-    # Normalization caps 
+    # normalization caps 
     MAX_DIST = 20.0          
     MAX_FOOD = 10.0        
     MAX_ANTS = 12.0        
     MAX_DIST_SQ = MAX_DIST * MAX_DIST
 
-    # Normalize into 0..1
+    # normalize into 0..1
     nf_min_food_dist = min(min_food_dist / MAX_DIST, 1.0)
     nf_worker_home = min(worker_home_dist / MAX_DIST, 1.0)
     nf_worker_carry = worker_carry  # already 0/1
@@ -144,8 +144,6 @@ def extract_features(state):
     nf_num_soldiers = min(num_soldiers / MAX_ANTS, 1.0)
     nf_food_dist_sq = min(food_dist_sq / MAX_DIST_SQ, 1.0)
 
-
-    # FINAL 10 FEATURES
     features = np.array([
         nf_min_food_dist,
         nf_worker_home,
