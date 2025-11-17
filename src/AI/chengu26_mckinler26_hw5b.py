@@ -9,17 +9,11 @@ from Move import Move
 from GameState import *
 from AIPlayerUtils import *
 import numpy as np
-from GameState import GameState
-
 import math
 
 # CS 421 - Homework 5: Part B
 # Date: Nov. 11, 2025
 # Authors: Malissa Chen and Rhiannon McKinley
-
-# -------------------------------------
-# Training functions
-# -------------------------------------
 
 # step 1:
 # network structure
@@ -58,29 +52,29 @@ def forward_matrix(x, weight_hidden, weight_output):
 def sigmoid_derivative(x):
     return x * (1 - x)
 
-# def backpropagation(x, target, weight_hidden, weight_output, learning_rate=0.5):
-#     # Forward pass
-#     h_b, y = forward_matrix(x, weight_hidden, weight_output)
+def backpropagation(x, target, weight_hidden, weight_output, learning_rate=0.5):
+    # Forward pass
+    h_b, y = forward_matrix(x, weight_hidden, weight_output)
 
-#     # Compute output error
-#     error_output = target - y  
-#     delta_output = error_output * sigmoid_derivative(y)  
+    # Compute output error
+    error_output = target - y  
+    delta_output = error_output * sigmoid_derivative(y)  
 
-#     # Compute hidden layer error
-#     h = h_b[:-1]  # remove bias from hidden output
-#     weight_output_no_bias = weight_output[:, :-1]  
-#     error_hidden = delta_output.dot(weight_output_no_bias) 
-#     delta_hidden = error_hidden * sigmoid_derivative(h) 
+    # Compute hidden layer error
+    h = h_b[:-1]  # remove bias from hidden output
+    weight_output_no_bias = weight_output[:, :-1]  
+    error_hidden = delta_output.dot(weight_output_no_bias) 
+    delta_hidden = error_hidden * sigmoid_derivative(h) 
 
-#     # Update output weights
-#     weight_output += learning_rate * delta_output.reshape(-1, 1) * h_b.reshape(1, -1)
+    # Update output weights
+    weight_output += learning_rate * delta_output.reshape(-1, 1) * h_b.reshape(1, -1)
 
-#     # Prepare input with bias
-#     x_b = np.append(x, 1)  # shape (5,)
-#     # Update hidden weights
-#     weight_hidden += learning_rate * delta_hidden.reshape(-1, 1) * x_b.reshape(1, -1)
+    # Prepare input with bias
+    x_b = np.append(x, 1)  # shape (5,)
+    # Update hidden weights
+    weight_hidden += learning_rate * delta_hidden.reshape(-1, 1) * x_b.reshape(1, -1)
 
-#     return weight_hidden, weight_output
+    return weight_hidden, weight_output
 
 # get features from gamestate
 def extract_features(state):
@@ -141,173 +135,191 @@ def extract_features(state):
         1 - threat_score
     ])
 
-####################################################################
-## CREDIT: Andrew Asch's utility function, permission from Dr.Nuxoll
-####################################################################
-#utility
-#Description: Determines how (un)/favorable the current game state is to player
-#
-#Parameters:
-#   currentState - A clone of the current state (GameState)
-##
-def utility(currentState):
-    #get pointers
-    me = currentState.whoseTurn
-    them = 1 - me
-
-    myAttAnts = getAntList(currentState, me, (DRONE, SOLDIER, R_SOLDIER))
-    myDrones = getAntList(currentState, me, (DRONE,))
-    mySoldiers = getAntList(currentState, me, (SOLDIER,))
-    myRSoldiers = getAntList(currentState, me, (R_SOLDIER,))
-    myDefAnts = getAntList(currentState, me, (DRONE, SOLDIER, R_SOLDIER, QUEEN))
-    myWorkers = getAntList(currentState, me, (WORKER,))
-
-    theirAnts = getAntList(currentState, them, (DRONE, SOLDIER, R_SOLDIER))
-    theirWorkers = getAntList(currentState, them, (WORKER,))
-
-    myFood = currentState.inventories[me].foodCount
-    myBuildObjs = getConstrList(currentState, me, (ANTHILL, TUNNEL))
-    myAnthill = currentState.inventories[me].getAnthill()
-    foodObjs = getConstrList(currentState, None, (FOOD,))
-    theirFood = currentState.inventories[them].foodCount
-    theirAnthill = currentState.inventories[them].getAnthill()
+# returns the next step from start moving toward goal
+# moves one tile in the direction that reduces the Manhattan distance
     
-    try:
-        myQueen = getAntList(currentState, me, (QUEEN,))[0]
-        myQueenHealth = myQueen.health
-    except IndexError:
-        myQueenHealth = 1 #queen is dead
-    
-    try:  
-        theirQueen = getAntList(currentState, them, (QUEEN,))[0]
-        theirQueenHealth = theirQueen.health
-    except IndexError:
-        theirQueenHealth = 1
-    
+def nearestLocation(start, goal):
+    x1, y1 = start
+    x2, y2 = goal
 
-    #NOTE: comparitive advantages
-    troopAdv = len(myAttAnts) - len(theirAnts) #incentivises placing troops
-    healthAdv = (myAnthill.captureHealth*4 + myQueenHealth) - \
-        (theirAnthill.captureHealth*4 + theirQueenHealth)
-    foodAdv = (myFood - theirFood)
-    
-    #NOTE: small movement/productivity utility bumps
-    #incentivises soldiers (reap the most benefit with least amount of strat)
-    antVal = len(mySoldiers)*2 + len(myRSoldiers) + len(myDrones) 
+    dx = x2 - x1
+    dy = y2 - y1
 
-    #incetivises having 1 worker
-    workerVal = min(len(myWorkers), 1) 
-    
-    #workers should be incentivised to be productive
-    stepsFromFood = [0]
-    stepsFromBuilding = [0]
-    carryingWorkers=0
-    for w in myWorkers: 
-        if w.carrying:
-            carryingWorkers += 1
-            #find the closest building to each worker and incentivise moving towards
-            stepsMinB = stepsToReach(currentState, w.coords, myBuildObjs[0].coords)
-            for b in myBuildObjs:
-                if stepsMinB > stepsToReach(currentState, w.coords, b.coords):
-                    stepsMinB = stepsToReach(currentState, w.coords, b.coords)
-            stepsFromBuilding.append(stepsMinB)
-                
-        else: 
-            #find the closest food to each worker and incentivise moving towards
-            stepsMinF = 999
-            for f in foodObjs:
-                if stepsMinF > stepsToReach(currentState, w.coords, f.coords) \
-                    and f.coords[1] < 4:
-                    stepsMinF = stepsToReach(currentState, w.coords, f.coords)
-            stepsFromFood.append(stepsMinF)
-    
-    #when workers are close to goal, provide a small bump to utility
-    #we also need to incentivise having the worker pick up and set
-    #down the food. If the worker is 1 distance away from the food,
-    #it knows that picking it up will shift the goal from the food 
-    #to the building. When the worker picks up the food it is further
-    #from the new goal, and utility is subtracted. To make the worker 
-    #actually reach the goals, we incetivised having workers carrying 
-    #food over any possible distance incentive, and getting us food. 
-    workerMvmt = (1/(sum(stepsFromFood) + sum(stepsFromBuilding) + 1) + \
-                    carryingWorkers + myFood*2)
+    # move 1 step horizontally if needed
+    if dx > 0:
+        return (x1 + 1, y1)
+    if dx < 0:
+        return (x1 - 1, y1)
 
-    #drone, soldier, and rsoldier should be insentivised to advance
-    moveForward = sum([min(ant.coords[1], 7) for ant in myAttAnts]) - \
-                    sum([min(9-ant.coords[1], 7) for ant in theirAnts])
-    
-    #drone, soldier, rsoldier and queen should be incetivised to defend 
-    #when they aren't yet in enemy territory. When they take health off
-    #attacking troops, they move is further rewarded. 
-    threats = []
-    for ant in theirAnts:
-        if ant.coords[1] < 6:
-            threats.append(ant)
-            
-    protectQ = 0
-    if len(threats) > 0:
-        defend = sum([1/stepsToReach(currentState, ant.coords, 
-                                        threats[0].coords) for ant in myDefAnts \
-                                        if ant.coords[1] < 6])-threats[0].health
-        #make sure the queen doesn't defend when she is a one shot
-        if myQueenHealth <=5: 
-            protectQ = min([stepsToReach(currentState, 
-                                            t.coords, 
-                                            myQueen.coords) for t in threats])
+    # move 1 step vertically if horizontal is aligned
+    if dy > 0:
+        return (x1, y1 + 1)
+    if dy < 0:
+        return (x1, y1 - 1)
 
-    else: defend = 0
+    # already at goal
+    return start
 
-    #incentivise getting closer to and killing workers
-    theirWorkerCount = -len(theirWorkers)
-    distFromWorkers = []
-    distFromQueen = []
-    for ant in myAttAnts:
-        try:
-            distFromWorkers.append(-min([stepsToReach(currentState, 
-                                                        ant.coords, 
-                                            w.coords) for w in theirWorkers]))
-        except ValueError:
-            pass #they have no workers left
-        try:
-            distFromQueen.append(-abs(ant.coords[0] - theirQueen.coords[0]) + \
-                                    -abs(ant.coords[1] - theirQueen.coords[1]))
-        except UnboundLocalError:
-            pass #queen is dead
+def worker_behavior(state, worker):
+    player_id = state.whoseTurn
+    inv = state.inventories[player_id]
 
-    attackWorkers = theirWorkerCount + sum(distFromWorkers)/10
-    attackQueen = -theirQueenHealth + sum(distFromQueen)/10
-    
-    #using arbitary weights so that variables interact with each other in the 
-    #way we expect
-    realAdv = troopAdv/5 + healthAdv/15 + foodAdv/50
-    gameplayIncentives = workerMvmt/1000 + antVal/1000 + moveForward/10000 + \
-        defend/100 + workerVal/10 + protectQ/100 + attackWorkers/100 + \
-        attackQueen/1000
+    # get target list of food
+    foods = getConstrList(state, NEUTRAL, [FOOD])
+    dropoffs = [inv.getAnthill()] + inv.getTunnels()
 
-    #need to scale output (using min/max)
-    # NOTE: ran at least 500 against all the agents provided and the ones
-    #that we made. We also played against the AI ourselves to 
-    # inflate/deflate utility in a utility that would reasonably occur 
-    # within gameplay. These were our max and min util values
-    # with a bit of safety buffer added on top. 
-    # NOTE: when we tested manually, we were able to generate utilities 
-    # of less than -10. In these situations the game is so disadvantageous 
-    # to us, that we are fine accepting the loss and bounding at a more 
-    # reasonable -1.5 in these extremely rare instances.
-    minUtil = -1.5
-    maxUtil = 1.75
-    scaleUtil = ((realAdv + gameplayIncentives) - minUtil) / (maxUtil - minUtil)
+   # find nearest targer
+    def closest_target(from_coord, targets):
+        if not targets:
+            return None
+        best = min(targets, key=lambda t: approxDist(from_coord, t.coords))
+        return best
 
-    #bite the bullet and bound util if it every leaves range
-    #should be incredibly rare 
-    scaleUtil = max(scaleUtil, 0)
-    scaleUtil = min(scaleUtil, 1)
-    
-    return scaleUtil
+    # if carrying food, go deliver
+    if worker.carrying:
+        drop = closest_target(worker.coords, dropoffs)
+        if drop is None:
+            return None  
+        
+        # if standing on dropoff, deposit food
+        if drop.coords == worker.coords:
+            return Move(MOVE_ANT, None, 0)   
 
-training_states = [GameState.getBasicState() for _ in range(50)]
+        # Move toward dropoff
+        path = (worker.coords, drop.coords)
+        if path and len(path) > 1:
+            return Move(MOVE_ANT, path[1], 1)
+        return None
 
-examples = [(extract_features(state), [utility(state)]) for state in training_states]
+    # not carrying food, find foods
+    food = closest_target(worker.coords, foods)
+    if food is None:
+        return None  # no food on board
+
+    # if standing on food
+    if worker.coords == food.coords:
+        return Move(END, None, None)
+
+    # move toward food
+    path = (worker.coords, food.coords)
+    if path and len(path) > 1:
+        return Move(MOVE_ANT, nearestLocation(worker.coords, food.coords), 1)
+
+    return None
+
+## utility function
+def evaluate(state):
+    # compute a normalized utility score for a given state
+    player_id = state.whoseTurn
+    opponent_id = 1 - player_id
+
+    my_inv = state.inventories[player_id]
+    opp_inv = state.inventories[opponent_id]
+
+    # food comparison
+    food_diff = my_inv.foodCount - opp_inv.foodCount
+    food_score = 0.5 + 0.5 * food_diff / max(abs(food_diff) + 2, 2)
+
+    # army strength
+    combat_types = (DRONE, SOLDIER, R_SOLDIER)
+
+    def effective_health(a):
+        return a.health + 7 if a.type == R_SOLDIER else a.health
+
+    my_army = sum(effective_health(a) for a in my_inv.ants if a.type in combat_types)
+    opp_army = sum(effective_health(a) for a in opp_inv.ants if a.type in combat_types)
+    army_score = 0.5 + 0.5 * (my_army - opp_army) / max(my_army + opp_army, 1)
+
+    # worker evaluation
+    def worker_factor(ants):
+        count = len([a for a in ants if a.type == WORKER])
+        if count == 0:
+            return 0.1
+        if count == 1:
+            return 0.6
+        if count == 2:
+            return 1.0
+        return 0.5
+
+    my_worker_score = worker_factor(my_inv.ants)
+    opp_worker_score = worker_factor(opp_inv.ants)
+    worker_score = 0.67 * my_worker_score + 0.33 * (1 - opp_worker_score)
+
+    # worker tasks
+    food_bonus, pickup_prox, delivery_prox = 0, 0.5, 0.5
+    my_workers = [a for a in my_inv.ants if a.type == WORKER]
+
+    if my_workers:
+        distances = []
+        hill_and_tunnels = [my_inv.getAnthill()] + my_inv.getTunnels()
+        foods = getConstrList(state, NEUTRAL, [FOOD])
+
+        for w in my_workers:
+            if w.carrying:
+                food_bonus += 0.3
+                if hill_and_tunnels:
+                    distances.append(min(approxDist(w.coords, d.coords) for d in hill_and_tunnels if d))
+            elif foods:
+                distances.append(min(approxDist(w.coords, f.coords) for f in foods))
+
+        if distances:
+            closest, avg_dist = min(distances), sum(distances) / len(distances)
+            delivery_prox = 1 / (1 + closest)
+            pickup_prox = 1 / (1 + avg_dist)
+
+        deposit_bonus = sum(
+            0.5 for w in my_workers if w.carrying and any(w.coords == d.coords for d in [my_inv.getAnthill()] + my_inv.getTunnels() if d)
+        )
+        task_score = 0.3 * pickup_prox + 0.2 * delivery_prox + food_bonus + deposit_bonus
+    else:
+        task_score = 0
+
+    # queen and hill factors
+    queen = my_inv.getQueen()
+    enemy_queen = opp_inv.getQueen()
+    my_hill = my_inv.getAnthill()
+    opp_hill = opp_inv.getAnthill()
+
+    queen_score = (queen.health / 10.0) if queen else 0
+    my_hill_score = min(max((my_hill.captureHealth / 3.0) if my_hill else 0, 0), 1)
+    opp_hill_score = min(max((opp_hill.captureHealth / 3.0) if opp_hill else 0, 0), 1)
+
+    def smooth_score(x, scale=6):
+        # converts a raw score into value between 0 and 1
+        return 1.0 / (1.0 + math.exp(-scale * (x - 0.5)))
+
+    # distances to attack and threats
+    def dist_score(ants, targets):
+        targets = [t for t in targets if t is not None]
+        if not ants or not targets:
+            return 0.5
+        dists = [approxDist(a.coords, t.coords) for a in ants for t in targets]
+        min_d, avg_d = min(dists), sum(dists) / len(dists)
+        return (1 / (1 + min_d) + 1 / (1 + avg_d)) / 2
+
+    attack_targets = [enemy_queen, opp_hill] + [a for a in opp_inv.ants if a.type == WORKER]
+    threat_targets = [queen, my_hill]
+    attack_score = dist_score(getAntList(state, player_id, combat_types), attack_targets)
+    threat_score = dist_score(getAntList(state, opponent_id, combat_types), threat_targets)
+
+    # combine scores
+    raw_score = (
+        0.30 * food_score +
+        0.20 * worker_score +
+        0.10 * task_score +
+        0.15 * army_score +
+        0.10 * queen_score +
+        0.05 * (1 - my_hill_score) +
+        0.05 * (1 - opp_hill_score) +
+        0.05 * attack_score -
+        0.05 * threat_score
+    )
+
+    return max(0.0, min(1.0, smooth_score(raw_score)))
+
+# training_states = [GameState.getBasicState() for _ in range(50)]
+
+# examples = [(extract_features(state), [evaluate(state)]) for state in training_states]
 
 
 # # training loop
@@ -362,67 +374,63 @@ class AIPlayer(Player):
     #   cpy           - whether the player is a copy (when playing itself)
     ##
     def __init__(self, inputPlayerId):
-        super(AIPlayer,self).__init__(inputPlayerId, "Network Web")
-    
-     # hard-coded trained weights
+        super(AIPlayer,self).__init__(inputPlayerId, "Network Webb")
+
+        # hard coded training weights
         self.weight_hidden = np.array([
-            [ 0.09722334,  0.42997507,  0.20544602,  0.08903977, -0.15309407,  0.29098089,
-             -0.12482558,  0.783546,    0.92692185, -0.23352063,  0.58264274],
-            [ 0.05960081,  0.13790009,  0.85155547, -0.85466814, -0.82393043, -0.95594127,
-              0.66523969,  0.5563135,   0.74183527,  0.95904765,  0.60193907],
-            [-0.07627701,  0.56182262, -0.7632983,   0.28121772, -0.71252916,  0.89086636,
-              0.04369664, -0.17067612, -0.47012451,  0.54923164, -0.08617081],
-            [ 0.13477455, -0.96451374,  0.23485233,  0.22042343,  0.23177465,  0.88330947,
-              0.3636406,  -0.2809842,  -0.12802944,  0.39316905, -0.88373574],
-            [ 0.33254482,  0.34028712, -0.5794326,  -0.74392691, -0.37013191, -0.27455569,
-              0.14039354, -0.12279697,  0.97575906, -0.79689899, -0.58422372],
-            [-0.67717783,  0.30641979, -0.49337617, -0.06701281, -0.51094568, -0.68165456,
-             -0.77924972,  0.31265918, -0.72343096, -0.60663214, -0.26214339],
-            [ 0.64226545, -0.80551845,  0.67594561, -0.80730099,  0.95319792, -0.06213961,
-              0.95352218,  0.20969104,  0.47880615, -0.92134542, -0.43382809],
-            [-0.75982564, -0.40793837, -0.76258832, -0.36442742, -0.17169278, -0.87214254,
-              0.38494424,  0.13320291, -0.46943978,  0.04627734, -0.81255651],
-            [ 0.1533625,   0.8600619,  -0.36256819,  0.33746587, -0.73493477,  0.43559342,
-             -0.42118781, -0.63361728,  0.17449538, -0.9583154,   0.66081907],
-            [-0.99014777,  0.35609436, -0.4598918,   0.47121835,  0.92483837, -0.50157115,
-              0.15231467,  0.18408386,  0.14496509, -0.55337545,  0.90642059],
-            [-0.10561944,  0.69294715,  0.39898451, -0.40489245,  0.62772545, -0.20672891,
-              0.76220639,  0.16254575,  0.76360053,  0.38519299,  0.45076817],
-            [ 0.00300733,  0.91252583,  0.28805211, -0.15164449,  0.21314499, -0.96089648,
-             -0.39685037,  0.32034707, -0.41948622,  0.23638942, -0.14174547],
-            [-0.7280126,  -0.40239608,  0.14013768,  0.18361621,  0.14968977,  0.30848018,
-              0.30420654, -0.13716313,  0.79413246, -0.26383699, -0.12619161],
-            [ 0.7832314,   0.61177267,  0.4076541,  -0.80065379,  0.83834991,  0.42725197,
-              0.99769401, -0.70110339,  0.7356368,  -0.67562944,  0.2298885 ],
-            [-0.75274972,  0.69562677,  0.61455998,  0.13750004, -0.18602309, -0.86244539,
-              0.39485755, -0.09291463,  0.44372151,  0.73237496,  0.95026363],
-            [ 0.71048556, -0.97769295, -0.2802681,   0.45796311, -0.65786177,  0.03983097,
-             -0.89132402, -0.60000695, -0.96407753,  0.58627428, -0.55439287]
+            [ 0.09862196,  0.43137369,  0.20572574,  0.09155729, -0.15169545,  0.29377814,
+            -0.12482558,  0.783546  ,  0.92832048, -0.23212201,  0.58543999],
+            [ 0.0536723 ,  0.13197158,  0.85036977, -0.86533946, -0.82985894, -0.96779829,
+            0.66523969,  0.5563135 ,  0.73590675,  0.95311914,  0.59008204],
+            [-0.0787361 ,  0.55936352, -0.76379011,  0.27679135, -0.71498825,  0.88594818,
+            0.04369664, -0.17067612, -0.4725836 ,  0.54677255, -0.09108899],
+            [ 0.1417715 , -0.9575168 ,  0.23625171,  0.23301793,  0.2387716 ,  0.89730336,
+            0.3636406 , -0.2809842 , -0.12103249,  0.40016599, -0.86974185],
+            [ 0.33585274,  0.34359505, -0.57877102, -0.73797265, -0.36682399, -0.26793984,
+            0.14039354, -0.12279697,  0.97906699, -0.79359107, -0.57760787],
+            [-0.67784455,  0.30575306, -0.49350951, -0.06821291, -0.5116124 , -0.68298801,
+            -0.77924972,  0.31265918, -0.72409769, -0.60729886, -0.26347683],
+            [ 0.64137126, -0.80641265,  0.67576677, -0.80891055,  0.95230373, -0.063928  ,
+            0.95352218,  0.20969104,  0.47791196, -0.92223962, -0.43561648],
+            [-0.75909879, -0.40721151, -0.76244294, -0.36311908, -0.17096592, -0.87068883,
+            0.38494424,  0.13320291, -0.46871293,  0.0470042 , -0.8111028 ],
+            [ 0.14854285,  0.85524225, -0.36353212,  0.32879051, -0.73975442,  0.42595413,
+            -0.42118781, -0.63361728,  0.16967573, -0.96313505,  0.65117978],
+            [-0.99159792,  0.3546442 , -0.46018183,  0.46860807,  0.92338821, -0.50447147,
+            0.15231467,  0.18408386,  0.14351494, -0.55482561,  0.90352027],
+            [-0.10597427,  0.69259232,  0.39891355, -0.40553114,  0.62737062, -0.20743856,
+            0.76220639,  0.16254575,  0.7632457 ,  0.38483816,  0.45005851],
+            [ 0.00185879,  0.9113773 ,  0.2878224 , -0.15371185,  0.21199646, -0.96319354,
+            -0.39685037,  0.32034707, -0.42063475,  0.23524089, -0.14404254],
+            [-0.73138524, -0.40576872,  0.13946315,  0.17754546,  0.14631713,  0.3017349 ,
+            0.30420654, -0.13716313,  0.79075982, -0.26720963, -0.13293688],
+            [ 0.78533815,  0.61387942,  0.40807546, -0.79686163,  0.84045667,  0.43146548,
+            0.99769401, -0.70110339,  0.73774356, -0.67352269,  0.23410201],
+            [-0.75138164,  0.69699485,  0.6148336 ,  0.13996258, -0.18465502, -0.85970923,
+            0.39485755, -0.09291463,  0.44508959,  0.73374304,  0.95299979],
+            [ 0.71424762, -0.97393089, -0.27951568,  0.46473481, -0.65409971,  0.04735509,
+            -0.89132402, -0.60000695, -0.96031547,  0.59003634, -0.54686875]
         ])
 
         self.weight_output = np.array([
-            [-0.29456887,  0.86291247,  0.42162745, -0.9270406,  -0.66688301,  0.24481565,
-              0.15935515, -0.52333623,  0.88193364,  0.24003433,  0.08475929,  0.18563125,
-              0.46982523, -0.36252937, -0.19137937, -0.57464766, -0.60963243]
+            [-0.3433716 ,  0.84076264,  0.37931765, -0.95803242, -0.67931062,  0.2386689 ,
+            0.14316103, -0.5262492 ,  0.83734084,  0.20000303,  0.04008353,  0.16642346,
+            0.43821947, -0.40755969, -0.23175306, -0.59352619, -0.66918056]
         ])
-    
-    # sigmoid activation
-    def sigmoid(self, x):
-        return 1 / (1 + np.exp(-x))
 
-    # neural network evaluation
-    def nn_utility(self, currentState):
-        features = extract_features(currentState)
-        # hidden layer
-        x_with_bias = np.append(features, 1.0)
-        hidden_input = np.dot(self.weight_hidden, x_with_bias)
-        hidden_output = self.sigmoid(hidden_input)
-        hidden_output_bias = np.append(hidden_output, 1.0)
-        # output layer
-        final_input = np.dot(self.weight_output, hidden_output_bias)
-        final_output = self.sigmoid(final_input)
-        return float(final_output)
+        # Variables for utility
+        self.anthillBestDist = None
+        self.tunnelBestDist = None
+        self.bestRet = None
     
+    def get_utility_score(self, state):
+        features = extract_features(state)
+        _, output = forward_matrix(
+            features,
+            self.weight_hidden,     
+            self.weight_output      
+        )
+        return float(output[0])
 
     ##
     #getPlacement
@@ -477,49 +485,19 @@ class AIPlayer(Player):
             return moves
         else:
             return [(0, 0)]
-        
+    
     ##
     # makeNode
     # creates a node dictionary with state, move, depth, and evaluation.
     ##
-    def makeNode(self, currentState, move, depth):
-        nextState = getNextState(currentState, move)
-        
-        return {"move": move, 
-                "state": nextState, 
-                "depth": depth, 
-                "eval": self.nn_utility(nextState) + depth, 
-                "parent": currentState}
-    
-    ##
-    #bestMove
-    #Description: Takes a list of all possible nodes from a gameState and
-    #   returns the node that will provide the AI with maximum utility. 
-    #   When multiple moves provide the same utility, a random one is returned.
-    #   This prevents cyclical behavior in the code.
-    #
-    #Parameters:
-    #   nodeList - a list of the nodes that would result from all the possible
-    #               moves from this gameState
-    ##
-    def bestMove(self, nodeList):
-        maxScore = []
-        maxNode = []
-        
-        #add all moves to the list that tentatively are the best
-        for i in nodeList:
-            if len(maxScore) == 0 or i['eval'] == maxScore[0]:
-                maxScore.append(i["eval"])
-                maxNode.append(i["move"])
-
-            #if there is a new best, clear the lists
-            if i['eval'] > maxScore[0]:
-                maxScore = []
-                maxNode = []
-                maxScore.append(i['eval'])
-                maxNode.append(i["move"])
-        
-        return random.choice(maxNode)
+    def makeNode(self, move, state, depth, parent):
+        return {
+            "move": move,
+            "state": state,
+            "depth": depth,
+            "eval": (self.get_utility_score(state)) + depth,
+            "parent": parent
+        }
     
     ##
     # expandNode
@@ -534,7 +512,7 @@ class AIPlayer(Player):
 
         for m in moves:
             nextState = getNextState(initNode["state"], m)
-            node = self.makeNode(initNode["state"], m, initNode["depth"] + 1)
+            node = self.makeNode(m, nextState, initNode["depth"] + 1, initNode)
             nodes.append(node)
 
         return nodes
@@ -549,10 +527,41 @@ class AIPlayer(Player):
     #Return: The Move to be made
     ##
     def getMove(self, currentState):
-        moves = listAllLegalMoves(currentState)
-        nodeList = [self.makeNode(currentState, m, 1) for m in moves]
+        frontierNodes = []
+
+        rootNode = self.makeNode(None, currentState, 0, None) # root node is depth 0 and has no parent node
+        frontierNodes.append(rootNode)
+    
+        A_STAR_DEPTH = 3 
+        for i in range(0, A_STAR_DEPTH):
+            lowestNode = frontierNodes[0]
+            for node in frontierNodes:
+                if node["eval"] < lowestNode["eval"]:
+                    lowestNode = node
+
+            frontierNodes.remove(lowestNode)
+            nodeList = self.expandNode(lowestNode)
+            for node in nodeList:
+                frontierNodes.append(node)
         
-        return self.bestMove(nodeList)
+        bestList = []
+        lowestNode = frontierNodes[0]
+        for node in frontierNodes:
+            if node["eval"] < lowestNode["eval"]:
+                lowestNode = node
+                bestList.clear()
+            if node["eval"] == lowestNode["eval"]:
+                bestList.append(node)
+        
+        if len(bestList) > 0 :
+            bestList.append(lowestNode)
+            lowestNode = bestList[random.randint(0, len(bestList) - 1)]
+
+        while lowestNode["parent"] is not None and lowestNode["parent"]["parent"] is not None:
+            lowestNode = lowestNode["parent"]
+
+
+        return lowestNode["move"]
 
     ##
     #getAttack
@@ -576,3 +585,4 @@ class AIPlayer(Player):
         #method templaste, not implemented
         pass
 
+   
